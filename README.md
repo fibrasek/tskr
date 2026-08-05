@@ -25,11 +25,17 @@ Automated testing runs on every push and pull request via GitHub Actions ([`.git
 
 ## Installation
 
-### Prerequisites
+### Pre-compiled Binaries (Linux & macOS)
+
+Pre-compiled binaries for Linux (`amd64`, `arm64`) and macOS/OSX (`amd64`, `arm64`) are automatically published for every tagged release (such as `0.1.0`).
+
+Download the latest release archive for your OS from GitHub Releases, extract it, and place `tskr` in your `$PATH` (or run `./tskr install`).
+
+### Build from Source
+
+#### Prerequisites
 - Go 1.22+ installed on your system.
 - Git CLI available on your system.
-
-### Build & Install
 
 ```bash
 # Clone or navigate to the repository
