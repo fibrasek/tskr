@@ -1,0 +1,11 @@
+# Binaries
+tskr
+*.exe
+*.exe.manifest
+*.dll
+*.so
+*.dylib
+
+# Test artifacts & temp files
+*.test
+*.out
