@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"tskr/internal/config"
 )
 
 func setupTestGitRepo(t *testing.T, repoDir string) {
@@ -79,7 +81,7 @@ func Test_runCLI_Table(t *testing.T) {
 			expectedOut: "tskr started for my-repo",
 			checkArtifact: func(t *testing.T) {
 				taskRefsDir := filepath.Join(repoDir, ".task-refs")
-				for _, f := range defaultTaskFiles {
+				for _, f := range config.DefaultTaskFiles {
 					linkPath := filepath.Join(taskRefsDir, f)
 					info, err := os.Lstat(linkPath)
 					if err != nil {
@@ -111,6 +113,61 @@ func Test_runCLI_Table(t *testing.T) {
 			workingDir: tempHome,
 			args:       []string{"tskr", "go", "999"},
 			wantErr:    true,
+		},
+		{
+			name:        "subcommand config show",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "config", "show"},
+			wantErr:     false,
+			expectedOut: "Active Config File:",
+		},
+		{
+			name:        "subcommand config set files.naming",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "config", "set", "files.naming", "fileA.md,fileB.md"},
+			wantErr:     false,
+			expectedOut: "Configuration files.naming updated successfully",
+		},
+		{
+			name:        "subcommand config convert yaml",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "config", "convert", "yaml"},
+			wantErr:     false,
+			expectedOut: "Configuration converted to yaml",
+		},
+		{
+			name:        "subcommand install with custom dir",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "install", "--dir", filepath.Join(tempHome, "custombin")},
+			wantErr:     false,
+			expectedOut: "tskr installed to",
+			checkArtifact: func(t *testing.T) {
+				installedBin := filepath.Join(tempHome, "custombin", "tskr")
+				if _, err := os.Stat(installedBin); err != nil {
+					t.Errorf("expected installed binary %s to exist", installedBin)
+				}
+			},
+		},
+		{
+			name:        "subcommand completion bash",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "completion", "bash"},
+			wantErr:     false,
+			expectedOut: "bash completion for tskr",
+		},
+		{
+			name:        "subcommand completion zsh",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "completion", "zsh"},
+			wantErr:     false,
+			expectedOut: "#compdef tskr",
+		},
+		{
+			name:        "subcommand completion fish",
+			workingDir:  tempHome,
+			args:        []string{"tskr", "completion", "fish"},
+			wantErr:     false,
+			expectedOut: "fish completion for tskr",
 		},
 		{
 			name:       "unknown subcommand",

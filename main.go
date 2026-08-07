@@ -6,14 +6,14 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 	"text/tabwriter"
-)
 
-var defaultTaskFiles = []string{
-	"task-requirements.md",
-	"task-implementation.md",
-	"task-tests.md",
-}
+	"tskr/internal/completion"
+	"tskr/internal/config"
+	"tskr/internal/git"
+	"tskr/internal/installer"
+)
 
 func main() {
 	if err := runCLI(os.Args, os.Stdout, os.Stderr); err != nil {
@@ -33,8 +33,10 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 	switch subcommand {
 	case "init":
 		return handleInit(stdout)
+	case "config":
+		return handleConfig(args[2:], stdout)
 	case "install":
-		return handleInstall(stdout)
+		return installer.Install(args[2:], stdout)
 	case "start":
 		return handleStart(stdout)
 	case "switch":
@@ -52,6 +54,8 @@ func runCLI(args []string, stdout, stderr io.Writer) error {
 			return fmt.Errorf("invalid id %q: %w", args[2], err)
 		}
 		return handleGo(stdout, id)
+	case "completion":
+		return completion.Generate(args[2:], stdout)
 	case "-h", "--help", "help":
 		printUsage(stdout)
 		return nil
@@ -65,29 +69,33 @@ func printUsage(w io.Writer) {
 	fmt.Fprintln(w, "tskr - task reference context manager")
 	fmt.Fprintln(w, "")
 	fmt.Fprintln(w, "Usage:")
-	fmt.Fprintln(w, "  tskr init         Initialize configuration and storage directory")
-	fmt.Fprintln(w, "  tskr install      Install tskr binary to $HOME/.local/bin")
-	fmt.Fprintln(w, "  tskr start        Start task tracking in current repository")
-	fmt.Fprintln(w, "  tskr switch       Switch symlinks to current branch task context")
-	fmt.Fprintln(w, "  tskr sync         Synchronize symlinks for current repository and branch")
-	fmt.Fprintln(w, "  tskr list         List all tracked task references")
-	fmt.Fprintln(w, "  tskr go <id>      Print command to navigate to repository and switch branch")
+	fmt.Fprintln(w, "  tskr init                  Initialize configuration and storage directory")
+	fmt.Fprintln(w, "  tskr config [show]         Show active configuration")
+	fmt.Fprintln(w, "  tskr config set <k> <v>    Set configuration value (storage_dir, files.naming)")
+	fmt.Fprintln(w, "  tskr config convert <fmt>  Convert configuration file to json, yaml, or toml")
+	fmt.Fprintln(w, "  tskr install               Install tskr binary to $HOME/.local/bin")
+	fmt.Fprintln(w, "  tskr start                 Start task tracking in current repository")
+	fmt.Fprintln(w, "  tskr switch                Switch symlinks to current branch task context")
+	fmt.Fprintln(w, "  tskr sync                  Synchronize symlinks for current repository and branch")
+	fmt.Fprintln(w, "  tskr list                  List all tracked task references")
+	fmt.Fprintln(w, "  tskr go <id>               Print command to navigate to repository and switch branch")
+	fmt.Fprintln(w, "  tskr completion <sh>       Generate shell completion script (bash, zsh, fish)")
 }
 
 // handleInit initializes user config and storage directories.
 func handleInit(w io.Writer) error {
-	configDir, err := GetDefaultConfigDir()
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "config.json")
+	configPath := config.FindConfigFile(configDir)
 
-	cfg, err := LoadConfig(configPath)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	if err := SaveConfig(configPath, cfg); err != nil {
+	if err := config.SaveConfig(configPath, cfg); err != nil {
 		return err
 	}
 
@@ -96,12 +104,12 @@ func handleInit(w io.Writer) error {
 	}
 
 	refsPath := filepath.Join(cfg.StorageDir, "task-references.json")
-	refs, err := LoadReferences(refsPath)
+	refs, err := config.LoadReferences(refsPath)
 	if err != nil {
 		return err
 	}
 
-	if err := SaveReferences(refsPath, refs); err != nil {
+	if err := config.SaveReferences(refsPath, refs); err != nil {
 		return err
 	}
 
@@ -109,63 +117,88 @@ func handleInit(w io.Writer) error {
 	return nil
 }
 
-// handleInstall copies the binary to $HOME/.local/bin and checks PATH.
-func handleInstall(w io.Writer) error {
-	exePath, err := os.Executable()
+// handleConfig handles configuration inspection, setting, and conversion commands.
+func handleConfig(args []string, w io.Writer) error {
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
-		return fmt.Errorf("get executable path: %w", err)
+		return err
 	}
 
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fmt.Errorf("get user home dir: %w", err)
-	}
-
-	installDir := filepath.Join(home, ".local", "bin")
-	if err := os.MkdirAll(installDir, 0755); err != nil {
-		return fmt.Errorf("create install dir: %w", err)
-	}
-
-	destPath := filepath.Join(installDir, "tskr")
-
-	srcFile, err := os.Open(exePath)
-	if err != nil {
-		return fmt.Errorf("open binary for reading: %w", err)
-	}
-	defer srcFile.Close()
-
-	destFile, err := os.OpenFile(destPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0755)
-	if err != nil {
-		return fmt.Errorf("create destination binary: %w", err)
-	}
-	defer destFile.Close()
-
-	if _, err := io.Copy(destFile, srcFile); err != nil {
-		return fmt.Errorf("copy binary: %w", err)
-	}
-
-	fmt.Fprintf(w, "tskr installed to %s\n", destPath)
-
-	pathEnv := os.Getenv("PATH")
-	if !filepathInPATH(installDir, pathEnv) {
-		fmt.Fprintf(w, "warning: %s is not in your PATH. Add it to your shell profile.\n", installDir)
-	} else {
-		fmt.Fprintln(w, "tskr is in your PATH and ready to use.")
-	}
-
-	return nil
-}
-
-// filepathInPATH returns true if targetDir matches any directory entry in pathEnv.
-func filepathInPATH(targetDir, pathEnv string) bool {
-	dirs := filepath.SplitList(pathEnv)
-	targetClean := filepath.Clean(targetDir)
-	for _, d := range dirs {
-		if filepath.Clean(d) == targetClean {
-			return true
+	if len(args) == 0 || args[0] == "show" {
+		configPath := config.FindConfigFile(configDir)
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			return err
 		}
+		fmt.Fprintf(w, "Active Config File: %s\n", configPath)
+		fmt.Fprintf(w, "Storage Directory: %s\n", cfg.StorageDir)
+		fmt.Fprintf(w, "Task Files:\n")
+		for _, f := range cfg.GetTaskFiles() {
+			fmt.Fprintf(w, "  - %s\n", f)
+		}
+		return nil
 	}
-	return false
+
+	subcommand := args[0]
+	switch subcommand {
+	case "set":
+		if len(args) < 3 {
+			return fmt.Errorf("usage: tskr config set <key> <value>")
+		}
+		key := strings.ToLower(args[1])
+		val := args[2]
+
+		configPath := config.FindConfigFile(configDir)
+		cfg, err := config.LoadConfig(configPath)
+		if err != nil {
+			return err
+		}
+
+		switch key {
+		case "storage_dir", "storagedir":
+			cfg.StorageDir = val
+		case "files.naming", "files_naming", "naming", "task_files":
+			parts := strings.Split(val, ",")
+			var names []string
+			for _, p := range parts {
+				trimmed := strings.TrimSpace(p)
+				if trimmed != "" {
+					names = append(names, trimmed)
+				}
+			}
+			cfg.Files.Naming = names
+		default:
+			return fmt.Errorf("unknown config key %q (supported: storage_dir, files.naming)", key)
+		}
+
+		if err := config.SaveConfig(configPath, cfg); err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "Configuration %s updated successfully.\n", key)
+		return nil
+
+	case "convert":
+		if len(args) < 2 {
+			return fmt.Errorf("usage: tskr config convert <json|yaml|toml>")
+		}
+		targetFmt := args[1]
+		if targetFmt == "--to" {
+			if len(args) < 3 {
+				return fmt.Errorf("usage: tskr config convert --to <json|yaml|toml>")
+			}
+			targetFmt = args[2]
+		}
+
+		newPath, err := config.ConvertConfig(configDir, targetFmt)
+		if err != nil {
+			return err
+		}
+		fmt.Fprintf(w, "Configuration converted to %s: %s\n", targetFmt, newPath)
+		return nil
+
+	default:
+		return fmt.Errorf("unknown config subcommand %q (usage: tskr config [show|set|convert])", subcommand)
+	}
 }
 
 // handleStart initializes task files and symlinks for current git repo and branch.
@@ -175,35 +208,36 @@ func handleStart(w io.Writer) error {
 		return fmt.Errorf("get current working dir: %w", err)
 	}
 
-	repoRoot, err := GetGitRepoRoot(cwd)
+	repoRoot, err := git.GetGitRepoRoot(cwd)
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
 
-	branch, err := GetGitBranch(repoRoot)
+	branch, err := git.GetGitBranch(repoRoot)
 	if err != nil {
 		return fmt.Errorf("get git branch: %w", err)
 	}
 
-	configDir, err := GetDefaultConfigDir()
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "config.json")
-	cfg, err := LoadConfig(configPath)
+	configPath := config.FindConfigFile(configDir)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	repoName := ExtractRepoName(repoRoot)
-	safeBranch := SanitizeBranchName(branch)
+	repoName := git.ExtractRepoName(repoRoot)
+	safeBranch := git.SanitizeBranchName(branch)
 
 	storageBranchDir := filepath.Join(cfg.StorageDir, repoName, safeBranch)
 	if err := os.MkdirAll(storageBranchDir, 0755); err != nil {
 		return fmt.Errorf("create branch storage dir: %w", err)
 	}
 
-	for _, fileName := range defaultTaskFiles {
+	taskFiles := cfg.GetTaskFiles()
+	for _, fileName := range taskFiles {
 		filePath := filepath.Join(storageBranchDir, fileName)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			content := fmt.Sprintf("# %s\n\nTask context for %s (%s).\n", fileName, repoName, branch)
@@ -222,18 +256,18 @@ func handleStart(w io.Writer) error {
 		}
 	}
 
-	if err := createSymlinks(storageBranchDir, taskRefsDir); err != nil {
+	if err := createSymlinks(storageBranchDir, taskRefsDir, taskFiles); err != nil {
 		return err
 	}
 
 	refsPath := filepath.Join(cfg.StorageDir, "task-references.json")
-	refs, err := LoadReferences(refsPath)
+	refs, err := config.LoadReferences(refsPath)
 	if err != nil {
 		return err
 	}
 
-	ref := AddOrUpdateReference(refs, repoName, repoRoot, branch, storageBranchDir)
-	if err := SaveReferences(refsPath, refs); err != nil {
+	ref := config.AddOrUpdateReference(refs, repoName, repoRoot, branch, storageBranchDir)
+	if err := config.SaveReferences(refsPath, refs); err != nil {
 		return err
 	}
 
@@ -248,35 +282,36 @@ func handleSwitch(w io.Writer) error {
 		return fmt.Errorf("get current working dir: %w", err)
 	}
 
-	repoRoot, err := GetGitRepoRoot(cwd)
+	repoRoot, err := git.GetGitRepoRoot(cwd)
 	if err != nil {
 		return fmt.Errorf("not in a git repository: %w", err)
 	}
 
-	branch, err := GetGitBranch(repoRoot)
+	branch, err := git.GetGitBranch(repoRoot)
 	if err != nil {
 		return fmt.Errorf("get git branch: %w", err)
 	}
 
-	configDir, err := GetDefaultConfigDir()
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "config.json")
-	cfg, err := LoadConfig(configPath)
+	configPath := config.FindConfigFile(configDir)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
-	repoName := ExtractRepoName(repoRoot)
-	safeBranch := SanitizeBranchName(branch)
+	repoName := git.ExtractRepoName(repoRoot)
+	safeBranch := git.SanitizeBranchName(branch)
 
 	storageBranchDir := filepath.Join(cfg.StorageDir, repoName, safeBranch)
 	if err := os.MkdirAll(storageBranchDir, 0755); err != nil {
 		return fmt.Errorf("create branch storage dir: %w", err)
 	}
 
-	for _, fileName := range defaultTaskFiles {
+	taskFiles := cfg.GetTaskFiles()
+	for _, fileName := range taskFiles {
 		filePath := filepath.Join(storageBranchDir, fileName)
 		if _, err := os.Stat(filePath); os.IsNotExist(err) {
 			content := fmt.Sprintf("# %s\n\nTask context for %s (%s).\n", fileName, repoName, branch)
@@ -291,22 +326,22 @@ func handleSwitch(w io.Writer) error {
 		return fmt.Errorf("create .task-refs dir: %w", err)
 	}
 
-	if err := removeSymlinks(taskRefsDir); err != nil {
+	if err := removeSymlinks(taskRefsDir, taskFiles); err != nil {
 		return err
 	}
 
-	if err := createSymlinks(storageBranchDir, taskRefsDir); err != nil {
+	if err := createSymlinks(storageBranchDir, taskRefsDir, taskFiles); err != nil {
 		return err
 	}
 
 	refsPath := filepath.Join(cfg.StorageDir, "task-references.json")
-	refs, err := LoadReferences(refsPath)
+	refs, err := config.LoadReferences(refsPath)
 	if err != nil {
 		return err
 	}
 
-	ref := AddOrUpdateReference(refs, repoName, repoRoot, branch, storageBranchDir)
-	if err := SaveReferences(refsPath, refs); err != nil {
+	ref := config.AddOrUpdateReference(refs, repoName, repoRoot, branch, storageBranchDir)
+	if err := config.SaveReferences(refsPath, refs); err != nil {
 		return err
 	}
 
@@ -321,18 +356,18 @@ func handleSync(w io.Writer) error {
 
 // handleList prints formatted table of all tracked repository references.
 func handleList(w io.Writer) error {
-	configDir, err := GetDefaultConfigDir()
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "config.json")
-	cfg, err := LoadConfig(configPath)
+	configPath := config.FindConfigFile(configDir)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
 	refsPath := filepath.Join(cfg.StorageDir, "task-references.json")
-	refs, err := LoadReferences(refsPath)
+	refs, err := config.LoadReferences(refsPath)
 	if err != nil {
 		return err
 	}
@@ -355,23 +390,23 @@ func handleList(w io.Writer) error {
 
 // handleGo prints navigation command string for specified reference ID.
 func handleGo(w io.Writer, id int) error {
-	configDir, err := GetDefaultConfigDir()
+	configDir, err := config.GetDefaultConfigDir()
 	if err != nil {
 		return err
 	}
-	configPath := filepath.Join(configDir, "config.json")
-	cfg, err := LoadConfig(configPath)
+	configPath := config.FindConfigFile(configDir)
+	cfg, err := config.LoadConfig(configPath)
 	if err != nil {
 		return err
 	}
 
 	refsPath := filepath.Join(cfg.StorageDir, "task-references.json")
-	refs, err := LoadReferences(refsPath)
+	refs, err := config.LoadReferences(refsPath)
 	if err != nil {
 		return err
 	}
 
-	ref, err := FindReferenceByID(refs, id)
+	ref, err := config.FindReferenceByID(refs, id)
 	if err != nil {
 		return err
 	}
@@ -381,8 +416,8 @@ func handleGo(w io.Writer, id int) error {
 }
 
 // createSymlinks creates symlinks in targetDir pointing to files in storageDir.
-func createSymlinks(storageDir, targetDir string) error {
-	for _, fileName := range defaultTaskFiles {
+func createSymlinks(storageDir, targetDir string, files []string) error {
+	for _, fileName := range files {
 		src := filepath.Join(storageDir, fileName)
 		dest := filepath.Join(targetDir, fileName)
 
@@ -395,12 +430,23 @@ func createSymlinks(storageDir, targetDir string) error {
 }
 
 // removeSymlinks deletes symlinks from targetDir.
-func removeSymlinks(targetDir string) error {
-	for _, fileName := range defaultTaskFiles {
+func removeSymlinks(targetDir string, files []string) error {
+	for _, fileName := range files {
 		dest := filepath.Join(targetDir, fileName)
 		if err := os.Remove(dest); err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("remove symlink %s: %w", dest, err)
 		}
 	}
+
+	entries, err := os.ReadDir(targetDir)
+	if err == nil {
+		for _, entry := range entries {
+			info, err := entry.Info()
+			if err == nil && info.Mode()&os.ModeSymlink != 0 {
+				_ = os.Remove(filepath.Join(targetDir, entry.Name()))
+			}
+		}
+	}
+
 	return nil
 }

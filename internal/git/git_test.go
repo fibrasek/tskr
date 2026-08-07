@@ -1,4 +1,4 @@
-package main
+package git
 
 import (
 	"os"
@@ -85,7 +85,6 @@ func Test_GitOperations_InTempRepo(t *testing.T) {
 	cmdConfigEmail.Dir = tempDir
 	_ = cmdConfigEmail.Run()
 
-	// Initial commit to establish HEAD
 	dummyFile := filepath.Join(tempDir, "README.md")
 	if err := os.WriteFile(dummyFile, []byte("# Test"), 0644); err != nil {
 		t.Fatalf("failed to write dummy file: %v", err)

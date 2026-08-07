@@ -1,4 +1,5 @@
-package main
+// Package git provides helper functions to interact with Git repositories.
+package git
 
 import (
 	"bytes"

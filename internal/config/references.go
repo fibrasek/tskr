@@ -1,5 +1,4 @@
-// Package main implements the tskr CLI tool.
-package main
+package config
 
 import (
 	"encoding/json"
@@ -8,11 +7,6 @@ import (
 	"os"
 	"path/filepath"
 )
-
-// Config holds global configuration for tskr.
-type Config struct {
-	StorageDir string `json:"storage_dir"`
-}
 
 // Reference tracks task context metadata for a specific repository and branch.
 type Reference struct {
@@ -26,73 +20,6 @@ type Reference struct {
 // ReferencesMap contains the list of all tracked repository references.
 type ReferencesMap struct {
 	References []Reference `json:"references"`
-}
-
-// GetDefaultConfigDir returns default configuration directory ($HOME/.config/tskr).
-func GetDefaultConfigDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get user home dir: %w", err)
-	}
-	return filepath.Join(home, ".config", "tskr"), nil
-}
-
-// GetDefaultStorageDir returns default storage directory ($HOME/.tskr).
-func GetDefaultStorageDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", fmt.Errorf("get user home dir: %w", err)
-	}
-	return filepath.Join(home, ".tskr"), nil
-}
-
-// LoadConfig reads Config from configPath or creates default config if missing.
-func LoadConfig(configPath string) (*Config, error) {
-	data, err := os.ReadFile(configPath)
-	if err != nil {
-		if errors.Is(err, os.ErrNotExist) {
-			defaultStorage, err := GetDefaultStorageDir()
-			if err != nil {
-				return nil, err
-			}
-			return &Config{StorageDir: defaultStorage}, nil
-		}
-		return nil, fmt.Errorf("read config file: %w", err)
-	}
-
-	var cfg Config
-	if err := json.Unmarshal(data, &cfg); err != nil {
-		return nil, fmt.Errorf("parse config json: %w", err)
-	}
-
-	if cfg.StorageDir == "" {
-		defaultStorage, err := GetDefaultStorageDir()
-		if err != nil {
-			return nil, err
-		}
-		cfg.StorageDir = defaultStorage
-	}
-
-	return &cfg, nil
-}
-
-// SaveConfig writes Config to configPath in JSON format.
-func SaveConfig(configPath string, cfg *Config) error {
-	dir := filepath.Dir(configPath)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return fmt.Errorf("create config dir: %w", err)
-	}
-
-	data, err := json.MarshalIndent(cfg, "", "  ")
-	if err != nil {
-		return fmt.Errorf("marshal config: %w", err)
-	}
-
-	if err := os.WriteFile(configPath, data, 0644); err != nil {
-		return fmt.Errorf("write config file: %w", err)
-	}
-
-	return nil
 }
 
 // LoadReferences reads ReferencesMap from refsPath or returns empty map if missing.

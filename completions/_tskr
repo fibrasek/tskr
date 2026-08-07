@@ -1,0 +1,69 @@
+#compdef tskr
+
+_tskr() {
+    local -a commands
+    commands=(
+        'init:Initialize configuration and storage directory'
+        'config:Show, set, or convert configuration'
+        'install:Install tskr binary'
+        'start:Start task tracking in current repository'
+        'switch:Switch symlinks to current branch task context'
+        'sync:Synchronize symlinks for active branch'
+        'list:List all tracked task references'
+        'go:Print command to navigate to repository and branch'
+        'completion:Generate shell autocompletion script'
+        'help:Show help information'
+    )
+
+    _arguments -C \
+        '1: :->command' \
+        '*:: :->args'
+
+    case $state in
+        command)
+            _describe -t commands 'tskr command' commands
+            ;;
+        args)
+            case $words[1] in
+                config)
+                    local -a config_cmds
+                    config_cmds=(
+                        'show:Show active configuration'
+                        'set:Set a configuration value'
+                        'convert:Convert configuration format'
+                    )
+                    _arguments '1: :->config_cmd' '*:: :->config_args'
+                    case $state in
+                        config_cmd)
+                            _describe -t config_cmds 'config command' config_cmds
+                            ;;
+                        config_args)
+                            case $words[1] in
+                                set)
+                                    local -a keys
+                                    keys=('storage_dir:Storage directory path' 'files.naming:Comma-separated task file names')
+                                    _describe -t keys 'configuration key' keys
+                                    ;;
+                                convert)
+                                    local -a fmts
+                                    fmts=('json:JSON format' 'yaml:YAML format' 'toml:TOML format')
+                                    _describe -t fmts 'target format' fmts
+                                    ;;
+                            esac
+                            ;;
+                    esac
+                    ;;
+                install)
+                    _arguments '--dir[Custom installation directory]:directory:_files -/' '-d[Custom installation directory]:directory:_files -/'
+                    ;;
+                completion)
+                    local -a shells
+                    shells=('bash:Bash autocompletion' 'zsh:Zsh autocompletion' 'fish:Fish autocompletion')
+                    _describe -t shells 'shell' shells
+                    ;;
+            esac
+            ;;
+    esac
+}
+
+_tskr "$@"
