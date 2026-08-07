@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"tskr/internal/cli"
 	"tskr/internal/config"
 )
 
@@ -186,7 +187,7 @@ func Test_runCLI_Table(t *testing.T) {
 			var stdout bytes.Buffer
 			var stderr bytes.Buffer
 
-			err := runCLI(tt.args, &stdout, &stderr)
+			err := cli.Run(tt.args, &stdout, &stderr)
 			if (err != nil) != tt.wantErr {
 				t.Fatalf("runCLI() error = %v, wantErr %v", err, tt.wantErr)
 			}
@@ -216,7 +217,7 @@ func Test_switch_newBranch(t *testing.T) {
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
-	if err := runCLI([]string{"tskr", "start"}, &stdout, &stderr); err != nil {
+	if err := cli.Run([]string{"tskr", "start"}, &stdout, &stderr); err != nil {
 		t.Fatalf("tskr start failed: %v", err)
 	}
 
@@ -227,7 +228,7 @@ func Test_switch_newBranch(t *testing.T) {
 	}
 
 	stdout.Reset()
-	if err := runCLI([]string{"tskr", "switch"}, &stdout, &stderr); err != nil {
+	if err := cli.Run([]string{"tskr", "switch"}, &stdout, &stderr); err != nil {
 		t.Fatalf("tskr switch failed: %v", err)
 	}
 
